@@ -2,6 +2,8 @@ import streamlit as st
 import random
 import datetime
 import pandas as pd
+import re
+from collections import defaultdict
 from recipes import (
     add_recipe,
     store_recipes,
@@ -25,6 +27,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # Load recipes 
 recipes = store_recipes()
 existing_names = [r["Recipe Name"].strip().lower() for r in recipes]
+      
+import re
+import fractions
+
+import re
+import fractions
+import streamlit as st
 
 ## Add a new recipe        
 with tab1:
@@ -40,7 +49,7 @@ with tab1:
     rating = st.slider("Rating:", 0, 5, 1)
     
     if st.button("Add Recipe"):
-        # Validation
+        # Basic validation
         if not recipe_name or not ingredients or not instructions:
             st.warning("Please fill in all fields.")
         elif recipe_name.strip().lower() in existing_names:
@@ -48,18 +57,40 @@ with tab1:
         elif recipe_name.strip().isdigit():
             st.warning("Recipe name cannot be a number.")
         else:
-            import re
-            numbers = re.findall(r"\b\d*\.?\d+\b", ingredients) # to extract only numeric quantities
-            has_negative = any(float(num) < 0 for num in numbers)
+            ingredient_list = [ing.strip() for ing in ingredients.split(",") if ing.strip()]
+            has_negative = False
+            cleaned_ingredients = []
+
+            for ing in ingredient_list:
+                # Handle formats like 4-eggs
+                ing = re.sub(r"^(-?\d+(?:/\d+)?(?:\.\d+)?)-", r"\1 ", ing)
+
+                # Extract numeric part at start of string
+                match = re.match(r"^\s*(-?\d+(?:/\d+)?(?:\.\d+)?)", ing)
+                if match:
+                    try:
+                        qty = float(fractions.Fraction(match.group(1)))
+                        if qty < 0:
+                            has_negative = True
+                    except:
+                        st.warning(f"Could not parse quantity for ingredient: {ing}")
+                
+                cleaned_ingredients.append(ing.capitalize())
 
             if has_negative:
-                st.error("Ingredients cannot contain negative quantities. Please check your input.")
+                st.warning("Ingredients cannot contain negative quantities. Please correct your input.")
             else:
-                cleaned_ingredients = ", ".join(
-                    ing.strip().capitalize() for ing in ingredients.split(",") if ing.strip()
+                final_ingredients = ", ".join(cleaned_ingredients)
+                add_recipe(
+                    recipe_name.strip(),
+                    category,
+                    final_ingredients,
+                    prep_time,
+                    instructions.strip(),
+                    level,
+                    servings,
+                    rating
                 )
-
-                add_recipe(recipe_name.strip(), category, cleaned_ingredients, prep_time, instructions.strip(), level, servings, rating)
                 st.success(f"{recipe_name} was added successfully!")
 
 
@@ -172,13 +203,17 @@ with tab4:
             st.write(recipe["Instructions"])
 
         with col2:
-            # Number input for servings
+            # Number input for servings — stays persistent
             desired_servings = st.number_input(
                 "How many servings?",
                 min_value=1,
                 value=st.session_state.desired_servings,
                 step=1
             )
+
+            # Update session state when user changes servings
+            if desired_servings != st.session_state.desired_servings:
+                st.session_state.desired_servings = desired_servings
 
             # Scale ingredients
             scaled_ingredients = scale_ingredients(
@@ -194,8 +229,6 @@ with tab4:
 
     else:
         st.info("No recipes in the collection yet!")
-
-
 
 ## Generate shopping list 
 with tab5:
@@ -215,7 +248,6 @@ with tab5:
             st.markdown(f"### {recipe['Recipe Name']}")
             st.write(f"Ingredients per serving (default: {recipe['Servings']} servings):")
 
-            # Split ingredients 
             ingredients_list = [i.strip() for i in recipe["Ingredients"].split(",") if i.strip()]
             st.text_area(
                 "Ingredients",
@@ -228,12 +260,40 @@ with tab5:
 
         # Combined shopping list
         if st.button("Generate Combined Shopping List"):
+            combined_dict = defaultdict(float)
+
+            for ing in all_ingredients:
+                # Separate quantity from ingredient name
+                ing_clean = ing.replace("-", " ")  # handle cases like "4-eggs"
+                match = re.match(r"^\s*(\d+(?:/\d+)?(?:\.\d+)?)\s+(.*)$", ing_clean)
+                if match:
+                    qty_str, name = match.groups()
+                    try:
+                        qty = float(fractions.Fraction(qty_str))
+                    except:
+                        qty = 0
+                    # Normalize name (keep original)
+                    name = name.lower().strip()
+                    combined_dict[name] += qty
+                else:
+                    # No numeric quantity, just add as 1
+                    combined_dict[ing.lower().strip()] += 1
+
+            # Build final list with pluralization
+            final_list = []
+            for name, qty in combined_dict.items():
+                display_name = name
+                if qty != 1 and not name.endswith("s"):
+                    display_name += "s"
+                final_list.append(f"{round(qty, 2)} {display_name}")
+
             st.subheader("Combined Shopping List")
             st.text_area(
                 "Ingredients Needed:",
-                "\n".join(sorted(set(all_ingredients))),
+                "\n".join(final_list),
                 height=200,
-                key="combined_list"  
+                key="combined_list"
             )
+
     else:
         st.warning("Please select at least one recipe to generate a shopping list.")

@@ -2,6 +2,8 @@ import datetime
 import random
 import csv
 import json
+import re
+import fractions
 
 def add_recipe(recipe_name, category, ingredients, prep_time, instructions, level, servings=1, rating=0, cooking_history=None):
     """
@@ -151,14 +153,24 @@ def scale_ingredients(ingredients, original_servings, desired_servings):
     '''
     scale_factor = desired_servings / original_servings
     scaled = []
+
     for ingredient in ingredients.split(","):
-        words = ingredient.strip().split()
-        try:
-            qty = float(words[0])
-            words[0] = str(round(qty * scale_factor, 2))
-        except:
-            pass
-        scaled.append(" ".join(words))
+        ingredient = ingredient.strip()
+        # Match a number at the start (integer, decimal, or fraction) possibly followed by '-'
+        match = re.match(r"^(\d+(?:/\d+)?(?:\.\d+)?)(?:-|\s+)?(.*)", ingredient)
+        if match:
+            qty_str = match.group(1)
+            rest = match.group(2).strip()
+            try:
+                qty = float(fractions.Fraction(qty_str))
+                qty_scaled = round(qty * scale_factor, 2)
+                scaled.append(f"{qty_scaled} {rest}".strip())
+            except ValueError:
+                # If parsing fails, leave as is
+                scaled.append(ingredient)
+        else:
+            scaled.append(ingredient)
+
     return ", ".join(scaled)
 
 
